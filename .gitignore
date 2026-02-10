@@ -76,7 +76,7 @@ target/
 
 # Media files
 media/
-
+static_files/
 # Jupyter Notebook
 .ipynb_checkpoints
 

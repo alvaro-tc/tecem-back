@@ -33,8 +33,8 @@ SECRET_KEY = env('SECRET_KEY', default='insecure-S#perS3crEt_007')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
 
-ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS", default="*").split(" ")
-
+# ALLOWED_HOSTS = env("DJANGO_ALLOWED_HOSTS", default="*").split(" ")
+ALLOWED_HOSTS = [h.strip() for h in env("DJANGO_ALLOWED_HOSTS", default="*").split(" ") if h.strip()]
 
 # Application definition
 
@@ -51,6 +51,7 @@ INSTALLED_APPS = [
     "api.user",
     "api.authentication",
     "api.school",
+    "api.notifications",
     "api.publications",
     "api.web_config",
 ]
@@ -67,6 +68,18 @@ MIDDLEWARE = [
 ]
 
 ROOT_URLCONF = "core.urls"
+
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://emergentes.tumype.com",
+]
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+# USE_X_FORWARDED_HOST = False
+
+
+
+
 
 TEMPLATES = [
     {

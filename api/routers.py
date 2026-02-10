@@ -29,17 +29,15 @@ router.register(r"families", school_views.FamilyRelationshipViewSet, basename="f
 router.register(r"main-evaluations", school_views.MainEvaluationViewSet, basename="main-evaluations")
 router.register(r"sub-evaluations", school_views.SubEvaluationViewSet, basename="sub-evaluations")
 
-# Notifications
-from api.notifications.views import NotificationViewSet
-router.register(r"notifications", NotificationViewSet, basename="notifications")
 
 # Publications
 from api.publications.views import PublicationViewSet
 router.register(r"publications", PublicationViewSet, basename="publications")
 
 # Web Config (Social Media)
-from api.web_config.views import SocialMediaViewSet
+from api.web_config.views import SocialMediaViewSet, LandingPageConfigViewSet
 router.register(r"web-config", SocialMediaViewSet, basename="web-config")
+router.register(r"landing-page-config", LandingPageConfigViewSet, basename="landing-page-config")
 
 router.register(r"scores", school_views.ScoreViewSet, basename="scores")
 router.register(r"reports", school_views.ReportViewSet, basename="reports")

@@ -20,6 +20,11 @@ class ManageUserSerializer(serializers.ModelSerializer):
                   'first_name', 'paternal_surname', 'maternal_surname', 'ci_number', 'phone']
         read_only_fields = ['id', 'date']
 
+    def validate_email(self, value):
+        if not value:
+            return None
+        return value
+
     def create(self, validated_data):
         password = validated_data.pop('password', None)
         user = User(**validated_data)

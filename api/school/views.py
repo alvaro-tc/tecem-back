@@ -204,128 +204,187 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
     def preview_bulk_upload(self, request):
         """
         Preview a CSV or Excel file upload. Returns found and not found students.
+        Now uses robust parsing to extract full student details for creation.
         """
         file = request.FILES.get('file')
         if not file:
             return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
 
-        ci_list = []
+        students_found = [] # List of full student objects found in file
+        
         try:
             filename = file.name.lower()
-            ci_index = -1
-            start_row_index = 0
-            
-            target_headers = ['ci', 'carnet', 'cedula', 'ci_number', 'documento', 'c.i.', 'c.i']
-
             if filename.endswith('.csv'):
                 import csv
                 import io
                 decoded_file = file.read().decode('utf-8')
                 io_string = io.StringIO(decoded_file)
-                # Read lines to find header
+                # Read header
                 lines = io_string.readlines()
+                if not lines: return Response({"error": "Empty file"}, status=status.HTTP_400_BAD_REQUEST)
                 
-                header_row_idx = -1
-                delimiter = ','
-                
-                # Simple sniffer for delimiter
-                if lines and ';' in lines[0] and lines[0].count(';') > lines[0].count(','):
-                    delimiter = ';'
-
-                for i, line in enumerate(lines[:50]):
-                    row_values = [x.strip().lower() for x in line.split(delimiter)]
-                    # Check if any target header is in this row
-                    for idx, val in enumerate(row_values):
-                        if val in target_headers:
-                            ci_index = idx
-                            header_row_idx = i
-                            break
-                    if ci_index != -1:
-                        break
-                
-                if ci_index != -1:
-                    import re
-                    # Process data from next row
-                    for line in lines[header_row_idx+1:]:
-                        row_values = [x.strip() for x in line.split(delimiter)]
-                        if len(row_values) > ci_index:
-                            val = row_values[ci_index]
-                            ci = re.sub(r'\D', '', str(val))
-                            if ci: ci_list.append(ci)
-                else:
-                     return Response({"error": f"Could not find CI column in first 50 rows. Searched for: {target_headers}"}, status=status.HTTP_400_BAD_REQUEST)
-
+                delimiter = ';' if ';' in lines[0] and lines[0].count(';') > lines[0].count(',') else ','
+                headers = [h.strip().lower() for h in lines[0].split(delimiter)]
+                rows = [l.split(delimiter) for l in lines[1:]]
+            
             elif filename.endswith('.xlsx'):
                 import openpyxl
                 wb = openpyxl.load_workbook(file, data_only=True)
                 sheet = wb.active
-                
-                # Scan first 50 rows
-                for i, row in enumerate(sheet.iter_rows(max_row=50, values_only=True)):
-                    row_values = [str(cell).strip().lower() if cell is not None else '' for cell in row]
-                    
-                    for idx, val in enumerate(row_values):
-                        if val in target_headers:
-                            ci_index = idx
-                            start_row_index = i + 2 # 1-based index for next row
-                            break
-                    if ci_index != -1:
-                        break
-
-                if ci_index == -1:
-                    return Response({"error": f"Could not find CI column in first 50 rows. Searched for: {target_headers}"}, status=status.HTTP_400_BAD_REQUEST)
-                
+                # Scan first 50 rows for header
+                header_row_idx = 0
+                headers = []
+                found_header = False
                 import re
-                for row in sheet.iter_rows(min_row=start_row_index, values_only=True):
-                    if len(row) > ci_index and row[ci_index]:
-                        ci = re.sub(r'\D', '', str(row[ci_index]))
-                        if ci: ci_list.append(ci)
+                
+                target_headers = [
+                    'ci', 'carnet', 'cedula', 'documento', 'c.i.', 'c.i', 'ci_number',
+                    'paterno', 'apellido paterno', 'apellido_paterno', 'apellido 1',
+                    'nombre', 'nombres', 'nombre completo', 'nombres y apellidos', 'estudiante', 'apellidos y nombres'
+                ]
+                
+                rows_iter = list(sheet.iter_rows(values_only=True))
+                for i, row in enumerate(rows_iter[:50]):
+                   # Normalize headers
+                   row_strs = [re.sub(r'\s+', ' ', str(c).strip().lower()) if c else '' for c in row]
+                   if any(h in row_strs for h in target_headers):
+                       headers = row_strs
+                       header_row_idx = i
+                       found_header = True
+                       break
+                
+                if not found_header:
+                    return Response({"error": "Could not find valid headers (CI, Paterno, Nombres)"}, status=status.HTTP_400_BAD_REQUEST)
 
+                rows = rows_iter[header_row_idx+1:]
+            
             else:
-                return Response({"error": f"Unsupported file format: {filename}. Please use CSV or Excel (.xlsx)"}, status=status.HTTP_400_BAD_REQUEST)
+                 return Response({"error": "Unsupported file format"}, status=status.HTTP_400_BAD_REQUEST)
+
+            # Map headers
+            col_map = {}
+            for idx, h in enumerate(headers):
+                if h in ['ci', 'carnet', 'cedula', 'ci_number', 'documento', 'c.i.', 'c.i']: col_map['ci'] = idx
+                elif h in ['paterno', 'apellido paterno', 'apellido_paterno', 'apellido 1']: col_map['paterno'] = idx
+                elif h in ['materno', 'apellido materno', 'apellido_materno', 'apellido 2']: col_map['materno'] = idx
+                elif h in ['nombre', 'nombres', 'nombre completo', 'nombres y apellidos', 'estudiante', 'apellidos y nombres']: col_map['full_name'] = idx
+                elif h in ['email', 'correo', 'correo electronico']: col_map['email'] = idx
+                elif h in ['celular', 'telefono', 'phone', 'cel']: col_map['phone'] = idx
+
+            # Fallback
+            for idx, h in enumerate(headers):
+                 if h == 'nombres': col_map['nombres_only'] = idx
+
+            if 'ci' not in col_map:
+                 return Response({"error": f"Missing CI column. Found: {headers}"}, status=status.HTTP_400_BAD_REQUEST)
+
+            seen_cis = set()
+            import re
+
+            for row in rows:
+                if not row: continue
+                # Handle list from CSV or tuple from Excel
+                row_vals = [str(c).strip() if c is not None else '' for c in row]
+                
+                if len(row_vals) <= max(col_map.values()): continue # skip short rows
+
+                raw_ci = row_vals[col_map['ci']]
+                # Clean CI: keep only digits
+                ci = re.sub(r'\D', '', raw_ci)
+
+                if not ci: continue
+                
+                if ci in seen_cis: continue
+                seen_cis.add(ci)
+                
+                email = row_vals[col_map['email']] if 'email' in col_map else ''
+                phone = row_vals[col_map['phone']] if 'phone' in col_map else ''
+                
+                p_surname = row_vals[col_map['paterno']] if 'paterno' in col_map else ''
+                m_surname = row_vals[col_map['materno']] if 'materno' in col_map else ''
+                first_name = row_vals[col_map['nombres_only']] if 'nombres_only' in col_map else ''
+
+                # Logic for Full Name parsing
+                if 'full_name' in col_map and (not p_surname or not first_name):
+                    full_name_str = row_vals[col_map['full_name']]
+                    parts = full_name_str.split()
+                    if len(parts) >= 3:
+                         # "RIVERA CHAVEZ JUAN" -> Paterno: Rivera, Materno: Chavez, Nombre: Juan
+                         p_surname = parts[0]
+                         m_surname = parts[1]
+                         first_name = " ".join(parts[2:])
+                    elif len(parts) == 2:
+                         # "RIVERA JUAN" -> Paterno: Rivera, Nombre: Juan
+                         p_surname = parts[0]
+                         first_name = parts[1]
+                    elif len(parts) == 1:
+                         p_surname = parts[0]
+                    
+                    if p_surname: p_surname = p_surname.title()
+                    if m_surname: m_surname = m_surname.title()
+                    if first_name: first_name = first_name.title()
+
+                student_data = {
+                    'ci_number': ci,
+                    'paternal_surname': p_surname,
+                    'maternal_surname': m_surname,
+                    'first_name': first_name,
+                    'email': email,
+                    'phone': phone
+                }
+                
+                students_found.append(student_data)
 
         except Exception as e:
             import traceback
             traceback.print_exc()
             return Response({"error": f"Error parsing file: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Remove duplicates
-        ci_list = list(set(ci_list))
+        # Split into Existing vs New
+        found_cis = [s['ci_number'] for s in students_found]
+        existing_users_qs = User.objects.filter(ci_number__in=found_cis, role='STUDENT')
         
-        found_students = User.objects.filter(ci_number__in=ci_list, role='STUDENT')
-        found_data = []
-        found_cis = set()
-
+        # Create map of existing users
+        existing_map = {u.ci_number: u for u in existing_users_qs}
+        
         course_id = request.data.get('course_id')
         enrolled_student_ids = set()
         if course_id:
-             enrolled_student_ids = set(models.Enrollment.objects.filter(course_id=course_id, student__in=found_students).values_list('student_id', flat=True))
+             enrolled_student_ids = set(models.Enrollment.objects.filter(course_id=course_id, student__in=existing_users_qs).values_list('student_id', flat=True))
 
-        for student in found_students:
-            found_cis.add(student.ci_number)
-            found_data.append({
-                'id': student.id,
-                'ci_number': student.ci_number,
-                'first_name': student.first_name,
-                'paternal_surname': student.paternal_surname,
-                'maternal_surname': student.maternal_surname,
-                'email': student.email,
-                'is_enrolled': student.id in enrolled_student_ids
-            })
+        found_response = []
+        to_create_response = []
 
-        not_found_cis = [ci for ci in ci_list if ci not in found_cis]
+        for s in students_found:
+            ci = s['ci_number']
+            if ci in existing_map:
+                user = existing_map[ci]
+                found_response.append({
+                    'id': user.id,
+                    'ci_number': user.ci_number,
+                    'first_name': user.first_name,
+                    'paternal_surname': user.paternal_surname,
+                    'maternal_surname': user.maternal_surname,
+                    'email': user.email,
+                    'is_enrolled': user.id in enrolled_student_ids
+                })
+            else:
+                # New student to create
+                to_create_response.append(s)
 
         return Response({
-            "found": found_data,
-            "not_found": not_found_cis
+            "found": found_response,
+            "to_create": to_create_response
         }, status=status.HTTP_200_OK)
 
     @action(detail=False, methods=['post'])
     def confirm_bulk_enrollment(self, request):
         """
         Enroll a list of student IDs into a course.
+        Also creates new students if provided in 'students_to_create' list.
         """
         student_ids = request.data.get('student_ids', [])
+        students_to_create = request.data.get('students_to_create', [])
         course_id = request.data.get('course_id')
 
         if not course_id:
@@ -336,10 +395,47 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         except models.Course.DoesNotExist:
             return Response({"error": "Course not found"}, status=status.HTTP_404_NOT_FOUND)
 
+        created_users_count = 0
+        
+        # 1. Create new students
+        for s_data in students_to_create:
+            ci = s_data.get('ci_number')
+            if not ci: continue
+            
+            # Check if already exists (double check)
+            if User.objects.filter(ci_number=ci).exists():
+                user = User.objects.get(ci_number=ci)
+                student_ids.append(user.id)
+                continue
+            
+            try:
+                # Use manager create_user
+                email = s_data.get('email') or None
+                # Check email conflict
+                if email and User.objects.filter(email=email).exists():
+                     email = None # Unset email if conflict, prioritize creation
+                
+                new_user = User.objects.create_user(
+                    email=email,
+                    password=ci, # Default password is CI
+                    role='STUDENT',
+                    ci_number=ci,
+                    first_name=s_data.get('first_name', ''),
+                    paternal_surname=s_data.get('paternal_surname', ''),
+                    maternal_surname=s_data.get('maternal_surname', ''),
+                    phone=s_data.get('phone', '')
+                )
+                student_ids.append(new_user.id)
+                created_users_count += 1
+            except Exception as e:
+                print(f"Error creating user {ci}: {e}")
+
+        # 2. Enroll all
         enrolled_count = 0
+        student_ids = list(set(student_ids)) # Unique
+        
         for student_id in student_ids:
             try:
-                # Direct optimized insert could be better but get_or_create is safer
                 student = User.objects.get(id=student_id)
                 _, created = models.Enrollment.objects.get_or_create(student=student, course=course)
                 if created:
@@ -347,7 +443,11 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
             except User.DoesNotExist:
                 continue
 
-        return Response({"status": "success", "enrolled_count": enrolled_count}, status=status.HTTP_200_OK)
+        return Response({
+            "status": "success", 
+            "enrolled_count": enrolled_count,
+            "created_users_count": created_users_count
+        }, status=status.HTTP_200_OK)
 
 class FamilyRelationshipViewSet(viewsets.ModelViewSet):
     queryset = models.FamilyRelationship.objects.all()
@@ -619,15 +719,19 @@ class ReportViewSet(viewsets.ViewSet):
                                  total_weight += task.weight
                              
                              if total_weight > 0:
+                                 # raw_avg is Decimal
                                  raw_avg = weighted_sum / total_weight
-                                 final_score = float(raw_avg) * float(spec.percentage)
+                                 # Ensure spec.percentage is Decimal
+                                 final_score = raw_avg * spec.percentage
+                             else:
+                                 final_score = Decimal('0.00')
                         else:
                             # Direct Score from SpecialCriterionScore
                             score_obj = models.SpecialCriterionScore.objects.filter(
                                 enrollment=enrollment,
                                 special_criterion=spec
                             ).first()
-                            final_score = score_obj.score if score_obj else 0
+                            final_score = score_obj.score if score_obj else Decimal('0.00')
                         
                         # Add to Parent Group if exists
                         parent = spec.parent_criterion
@@ -638,6 +742,8 @@ class ReportViewSet(viewsets.ViewSet):
                                 'score': final_score,
                                 'is_special': True
                             })
+                             # Ensure raw_score is treated as Decimal (it starts as int 0? no, dependent on previous adds)
+                             # Let's verify initialization
                              grouped_criteria[parent.id]['raw_score'] += final_score
                              # We rarely add special points to sum_max_points as they are "extra", but strictly speaking user didn't specify. 
                              # Usually extra points don't increase the denominator, only the numerator.

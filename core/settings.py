@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     "api.user",
     "api.authentication",
     "api.school",
-    "api.notifications",
     "api.publications",
     "api.web_config",
 ]

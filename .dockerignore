@@ -1,0 +1,5 @@
+env
+.dockerignore
+.env
+Dockerfile
+venvs

@@ -238,3 +238,19 @@ class RegistrationRequest(models.Model):
 
     def __str__(self):
         return f"{self.first_name} {self.paternal_surname} - {self.course} ({self.status})"
+
+class CoursePreference(models.Model):
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='course_preferences')
+    course = models.ForeignKey(Course, on_delete=models.CASCADE, related_name='preferences')
+    last_sub_criterion = models.ForeignKey(CourseSubCriterion, on_delete=models.SET_NULL, null=True, blank=True)
+    # Could imply special criterion if we store ID as string or use separate field. 
+    # Logic in view will handle "special-ID" vs ID.
+    # For DB normalization, let's keep it simple: store ID/Type or just a string "preference_value"?
+    # "last_sub_criterion" is specific. Let's make it flexible:
+    last_viewed_tab = models.CharField(max_length=50, blank=True, null=True, help_text="ID or 'special-ID'")
+
+    class Meta:
+        unique_together = ('user', 'course')
+
+    def __str__(self):
+        return f"{self.user} - {self.course}: {self.last_viewed_tab}"

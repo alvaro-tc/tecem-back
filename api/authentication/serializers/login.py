@@ -11,7 +11,7 @@ from api.authentication.models import ActiveSession
 
 def _generate_jwt_token(user):
     token = jwt.encode(
-        {"id": user.pk, "exp": datetime.utcnow() + timedelta(days=7)},
+        {"id": user.pk, "exp": datetime.utcnow() + timedelta(days=settings.JWT_TOKEN_LIFETIME_DAYS)},
         settings.SECRET_KEY,
         algorithm="HS256"
     )

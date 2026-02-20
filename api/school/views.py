@@ -179,6 +179,31 @@ class CourseViewSet(viewsets.ModelViewSet):
 
         return queryset
 
+    @action(detail=True, methods=['get'])
+    def preference(self, request, pk=None):
+        """Get user preference for this course (last viewed tab)."""
+        try:
+            course = self.get_object()
+            pref, created = models.CoursePreference.objects.get_or_create(user=request.user, course=course)
+            return Response({'last_viewed_tab': pref.last_viewed_tab})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'])
+    def set_preference(self, request, pk=None):
+        """Set user preference for this course."""
+        try:
+            course = self.get_object()
+            last_viewed_tab = request.data.get('last_viewed_tab')
+            
+            pref, created = models.CoursePreference.objects.get_or_create(user=request.user, course=course)
+            pref.last_viewed_tab = last_viewed_tab
+            pref.save()
+            
+            return Response({'status': 'success', 'last_viewed_tab': last_viewed_tab})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
 class EnrollmentViewSet(viewsets.ModelViewSet):
     queryset = models.Enrollment.objects.all()
     serializer_class = serializers.EnrollmentSerializer
@@ -1280,6 +1305,12 @@ class TaskScoreViewSet(viewsets.ModelViewSet):
                     elif crit_type == 'special':
                         pass
 
+                # Update Final Grade
+                try:
+                    update_final_grade(enroll_id)
+                except Exception as e:
+                    print(f"Error updating final grade for {enroll_id}: {e}")
+
             return Response({'status': 'success', 'saved': len(saved_scores)})
         except Exception as e:
             import traceback
@@ -1315,6 +1346,7 @@ class TaskScoreViewSet(viewsets.ModelViewSet):
                     'nombre': student.first_name,
                     'paterno': student.paternal_surname,
                     'materno': student.maternal_surname,
+                    'ci': student.ci_number,
                     'scores': score_map
                 })
                 

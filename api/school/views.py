@@ -684,6 +684,22 @@ class ReportViewSet(viewsets.ViewSet):
                                 'is_special': False
                             }
                         
+                        sub_tasks_list = []
+                        if sub.has_tasks:
+                             tasks = models.CourseTask.objects.filter(sub_criterion=sub)
+                             task_scores = models.TaskScore.objects.filter(
+                                 enrollment=enrollment,
+                                 task__sub_criterion=sub
+                             )
+                             score_map_tasks = {ts.task_id: ts.score for ts in task_scores}
+                             for task in tasks:
+                                 score_val = score_map_tasks.get(task.id, 0)
+                                 sub_tasks_list.append({
+                                     'name': task.name,
+                                     'weight': float(task.weight),
+                                     'score': float(score_val)
+                                 })
+                        
                         # Get Score
                         sub_score = 0
                         
@@ -713,7 +729,8 @@ class ReportViewSet(viewsets.ViewSet):
                             'name': sub.name,
                             'max_points': sub_max,
                             'score': sub_score,
-                            'is_special': False
+                            'is_special': False,
+                            'tasks': sub_tasks_list
                         })
                         grouped_criteria[parent.id]['sum_max_points'] += sub_max
                         grouped_criteria[parent.id]['raw_score'] += sub_score
@@ -725,6 +742,7 @@ class ReportViewSet(viewsets.ViewSet):
 
                     for spec in special_criteria:
                         final_score = 0
+                        sub_tasks_list = []
                         
                         # Logic from gradesheet: Calculate from tasks if has_tasks
                         if spec.has_tasks:
@@ -740,6 +758,11 @@ class ReportViewSet(viewsets.ViewSet):
                              
                              for task in tasks:
                                  score_val = score_map_tasks.get(task.id, 0)
+                                 sub_tasks_list.append({
+                                     'name': task.name,
+                                     'weight': float(task.weight),
+                                     'score': float(score_val)
+                                 })
                                  weighted_sum += score_val * task.weight
                                  total_weight += task.weight
                              
@@ -765,7 +788,8 @@ class ReportViewSet(viewsets.ViewSet):
                                 'name': f"{spec.name} (Extra)",
                                 'max_points': spec.percentage,
                                 'score': final_score,
-                                'is_special': True
+                                'is_special': True,
+                                'tasks': sub_tasks_list
                             })
                              # Ensure raw_score is treated as Decimal (it starts as int 0? no, dependent on previous adds)
                              # Let's verify initialization
@@ -779,7 +803,8 @@ class ReportViewSet(viewsets.ViewSet):
                                 'max_points': spec.percentage,
                                 'score': final_score,
                                 'sub_criteria': [],
-                                'is_special': True
+                                'is_special': True,
+                                'tasks': sub_tasks_list
                             })
 
                     # 3. Finalize Groups and Apply Caps
@@ -1333,7 +1358,7 @@ class TaskScoreViewSet(viewsets.ModelViewSet):
             else:
                 tasks = models.CourseTask.objects.filter(sub_criterion_id=sub_criterion_id).order_by('id')
             
-            enrollments = models.Enrollment.objects.filter(course_id=course_id).select_related('student')
+            enrollments = models.Enrollment.objects.filter(course_id=course_id).select_related('student').order_by('student__paternal_surname', 'student__maternal_surname', 'student__first_name')
             
             rows = []
             for enrollment in enrollments:

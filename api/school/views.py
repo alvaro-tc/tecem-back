@@ -223,7 +223,7 @@ class EnrollmentViewSet(viewsets.ModelViewSet):
         if course_id:
             queryset = queryset.filter(course_id=course_id)
             
-        return queryset
+        return queryset.order_by('student__paternal_surname', 'student__maternal_surname', 'student__first_name')
 
     @action(detail=False, methods=['post'])
     def preview_bulk_upload(self, request):

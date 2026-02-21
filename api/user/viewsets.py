@@ -25,7 +25,7 @@ class ManageUserViewSet(viewsets.ModelViewSet):
 
     def get_queryset(self):
         role = self.request.query_params.get('role')
-        queryset = User.objects.all()
+        queryset = User.objects.all().order_by('paternal_surname', 'maternal_surname', 'first_name')
         if role:
             queryset = queryset.filter(role=role)
         return queryset

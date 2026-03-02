@@ -41,6 +41,8 @@ class Course(models.Model):
     parallel = models.CharField(max_length=50, blank=True, null=True)
     schedule = models.TextField(blank=True, null=True)
     whatsapp_link = models.URLField(blank=True, null=True)
+    platform_link = models.URLField(blank=True, null=True)
+    course_identifier = models.CharField(max_length=100, blank=True, null=True, unique=True)
     
     # Registration Settings
     is_registration_open = models.BooleanField(default=False)

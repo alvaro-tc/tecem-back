@@ -65,10 +65,19 @@ class SubjectSerializer(serializers.ModelSerializer):
 class CourseSerializer(serializers.ModelSerializer):
     subject_details = SubjectSerializer(source='subject', read_only=True)
     teacher_name = serializers.CharField(source='teacher.email', read_only=True)
-    
+    course_identifier = serializers.CharField(
+        max_length=100, required=False, allow_blank=True, allow_null=True
+    )
+
     class Meta:
         model = models.Course
         fields = '__all__'
+
+    def validate_course_identifier(self, value):
+        # Convert empty string to None so unique constraint doesn't fail
+        if value == '' or value is None:
+            return None
+        return value
 
 class EnrollmentSerializer(serializers.ModelSerializer):
     student_name = serializers.CharField(source='student.email', read_only=True)

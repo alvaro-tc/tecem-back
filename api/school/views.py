@@ -1637,17 +1637,10 @@ class StudentCourseRegistrationViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['get'])
     def open_courses(self, request):
         now = timezone.now()
-        courses = models.Course.objects.filter(is_registration_open=True, active=True)
-        # Filter by dates if set
-        valid_courses = []
-        for course in courses:
-            if course.registration_start and now < course.registration_start:
-                continue
-            if course.registration_end and now > course.registration_end:
-                continue
-            valid_courses.append(course)
-        
-        serializer = serializers.CourseSerializer(valid_courses, many=True)
+        courses = models.Course.objects.filter(is_visible=True, active=True)
+        # Serialize all visible courses. The frontend uses course.is_registration_open
+        # to decide whether to show the "Inscribirse Ahora" button.
+        serializer = serializers.CourseSerializer(courses, many=True)
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'])

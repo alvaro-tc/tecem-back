@@ -44,6 +44,9 @@ class Course(models.Model):
     platform_link = models.URLField(blank=True, null=True)
     course_identifier = models.CharField(max_length=100, blank=True, null=True, unique=True)
     
+    # Visibility
+    is_visible = models.BooleanField(default=False, help_text="Si está activo, el curso aparece en la página principal y en la página de cursos públicos")
+
     # Registration Settings
     is_registration_open = models.BooleanField(default=False)
     registration_start = models.DateTimeField(null=True, blank=True)
